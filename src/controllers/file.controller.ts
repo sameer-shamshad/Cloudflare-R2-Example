@@ -1,11 +1,27 @@
 import { Request, Response } from 'express';
 import { r2Client } from '../config/r2Client';
 import { R2_BUCKET, BUCKET_PUBLIC_URL } from '../config/env.config';
-import { generateUniqueId, generateUniqueFileName } from '../utils/file.utils';
 
-export const uploadFile = async (req: Request, res: Response) => {
+interface AuthenticatedRequest extends Request {
+  user?: {
+    id: string;
+    [key: string]: any;
+  };
+}
+
+interface AuthenticatedRequest extends Request {
+  user?: {
+    id: string;
+    [key: string]: any;
+  };
+}
+
+export const uploadFile = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    // const user = req.user;
+    // Check if user is authenticated
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ message: 'Unauthorized - User authentication required' });
+    }
 
     if (!req.file) {
       return res.status(400).json({ message: 'No file uploaded' });
@@ -15,25 +31,14 @@ export const uploadFile = async (req: Request, res: Response) => {
       return res.status(500).json({ message: 'Bucket configuration is missing' });
     }
 
-    let fileKey = req.file.originalname;
+    const userId = req.user.id;
+    const timestamp = Date.now();
+    const originalName = req.file.originalname;
+    
+    // Format: filename-userId-Date.now()
+    const fileKey = `${originalName}-${userId}-${timestamp}`;
 
-    try { // Check if file exists
-      await r2Client.headObject({
-        Bucket: R2_BUCKET,
-        Key: fileKey,
-      }).promise();
-      
-      const uniqueId = await generateUniqueId(); // File exists, generate unique name with 4-digit ID
-      fileKey = await generateUniqueFileName(req.file.originalname, uniqueId);
-    } catch (error: any) { // File doesn't exist (404) or other error
-      if (error.code !== 'NotFound') {
-        console.error('Error checking file existence:', error);
-        return res.status(500).json({ message: 'Failed to check file existence' });
-      }
-    }
-
-    // File doesn't exist, proceed with original name
-    await r2Client.putObject({ // Upload file
+    await r2Client.putObject({
       Bucket: R2_BUCKET,
       Key: fileKey,
       Body: req.file.buffer,
